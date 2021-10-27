@@ -4,6 +4,8 @@
 
 int main(int argc, char *argv[])
 {
+  QCoreApplication::setOrganizationName("ExclusiveOrange");
+  QCoreApplication::setApplicationName("RGBA Composer");
   QApplication a(argc, argv);
   RgbaComposer w;
   w.show();

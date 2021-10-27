@@ -8,13 +8,23 @@
 #include <functional>
 #include <memory>
 
+// TODO: use QSettings to remember user choices
+
 namespace
 {
+  namespace UiConstant
+  {
+    static constexpr int channelNamePointSize = 32;
+    static constexpr int channelNameMinimumWidth = 50;
+    static constexpr int saveButtonPointSize = 24;
+  }
+
   struct ChannelUi
   {
     std::function<QString&(void)> fnInputDirectory;
     std::function<const QString&(void)> fnGetImageFilenameFilter;
 
+    QString name;
     QWidget *mainWidget{};
     QGridLayout *grid{};
 
@@ -74,12 +84,18 @@ namespace
 
   private:
     ChannelUi(QString name, QWidget *parent, State state = {})
+      : name{ name }
     {
       // R  ( ) constant |___________|
       //    (*) image    |filename.png|
-      //        [ ] invert
+      //        [r,g,b,a]  [ ] invert
 
-      mainWidget = new QWidget(parent);
+//      mainWidget = new QWidget(parent);
+      {
+        auto frame = new QFrame(parent);
+        frame->setFrameShape(QFrame::Box);
+        mainWidget = frame;
+      }
 
       {
         grid = new QGridLayout(mainWidget);
@@ -91,10 +107,10 @@ namespace
         {
           auto label = new QLabel(name);
           QFont font = label->font();
-          font.setPointSize(32);
+          font.setPointSize(UiConstant::channelNamePointSize);
           label->setFont(font);
-          label->setMinimumWidth(50);
-          grid->addWidget(label, 0, 0, 3, 1, Qt::AlignHCenter | Qt::AlignTop);
+          label->setMinimumWidth(UiConstant::channelNameMinimumWidth);
+          grid->addWidget(label, 0, 0, 3, 1, Qt::AlignHCenter | Qt::AlignVCenter);
         }
 
         // constant
@@ -139,14 +155,16 @@ namespace
       QString inputDirectory = fnInputDirectory ? fnInputDirectory() : QDir::rootPath();
       QString imageFilenameFilter = fnGetImageFilenameFilter ? fnGetImageFilenameFilter() : "All files (*.*)";
 
+      // try to get a filename from the user
       QString filename = QFileDialog::getOpenFileName(this->mainWidget, "Select an input image", inputDirectory, imageFilenameFilter);
       if (filename.isEmpty())
         return;
 
       this->image.filename = filename;
-      this->image.buttonFilename->setText(filename);
+      this->image.buttonFilename->setText(QDir::toNativeSeparators(filename));
       this->image.radio->setChecked(true);
 
+      // remember this directory for the next time an open file dialog is shown
       if (fnInputDirectory)
         fnInputDirectory() = QFileInfo(filename).absolutePath();
     }
@@ -178,6 +196,17 @@ struct RgbaComposer::Private
   QString lastInputDir = QDir::rootPath();
   QString imageFilenameFilter = generateImageFilenameFilter();
   std::unique_ptr<ChannelUi> channelUis[4]; // RGBA
+
+  void
+  onButtonSave()
+  {
+    // TODO: get filename or cancel
+    // TODO: show "please wait" or something
+    // TODO: get or create four single-color channel images
+    // TODO: combine channel images into single image
+    // TODO: write single image to file
+    // TODO: show "done" message"
+  }
 };
 
 RgbaComposer::RgbaComposer(QWidget *parent)
@@ -202,6 +231,7 @@ void RgbaComposer::setupUi()
   auto wholeLayout = new QVBoxLayout(wholeWidget);
   setCentralWidget(wholeWidget);
 
+  // RGBA input widgets
   for (int c = 0; c < 4; ++c)
   {
     auto ui = ChannelUi::create(QString("RGBA"[c]), wholeWidget);
@@ -209,6 +239,16 @@ void RgbaComposer::setupUi()
     ui->fnGetImageFilenameFilter = [this]() -> const QString& { return p->imageFilenameFilter; };
     wholeLayout->addWidget(ui->mainWidget);
     p->channelUis[c] = std::move(ui);
+  }
+
+  // save button
+  {
+    auto saveButton = new QPushButton("Save Composite Image...", wholeWidget);
+    auto font = saveButton->font();
+    font.setPointSize(UiConstant::saveButtonPointSize);
+    saveButton->setFont(font);
+    QObject::connect(saveButton, &QPushButton::clicked, [this](bool){ p->onButtonSave(); });
+    wholeLayout->addWidget(saveButton);
   }
 
   adjustSize();
