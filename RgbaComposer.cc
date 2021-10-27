@@ -5,12 +5,15 @@
 #include <QDebug>
 
 #include <functional>
-#include <vector>
+#include <memory>
 
 namespace
 {
   struct ChannelUi
   {
+    std::function<QString&(void)> fnInputDirectory;
+    std::function<const QString&(void)> fnGetImageFilenameFilter;
+
     QWidget *mainWidget{};
     QGridLayout *grid{};
 
@@ -37,15 +40,37 @@ namespace
       QComboBox *comboChannel{};
       QCheckBox *checkInvert{};
       QPushButton *buttonFilename{};
+      QString filename; // might be empty
     } image;
 
-    struct
+    static
+    std::unique_ptr<ChannelUi>
+    create(QString name, QWidget *parent, State state = {})
     {
-      std::function<void(ChannelUi&, bool selected)> onRadioConstant = [](auto, auto){ qDebug() << "onRadioConstant not implemented"; };
-      std::function<void(ChannelUi&, bool selected)> onRadioImage = [](auto, auto){ qDebug() << "onRadioImage not implemented"; };
-    } callbacks;
+      // can't use std::make_unique because constructor is private;
+      // this way is not exception safe
+      // since this is an internal struct I'm not worried
+      return std::unique_ptr<ChannelUi>{new ChannelUi(name, parent, state)};
+    }
 
-    explicit
+    ~ChannelUi() = default;
+
+    State
+    getState()
+    const
+    {
+      State s;
+
+      s.radioConstantSelected = constant.radio->isChecked();
+      s.radioImageSelected = image.radio->isChecked();
+      s.channelIndex = image.comboChannel->currentIndex();
+      s.constantValue = constant.value->value();
+      s.filename = image.buttonFilename->text();
+
+      return s;
+    }
+
+  private:
     ChannelUi(QString name, QWidget *parent, State state = {})
     {
       // R  ( ) constant |___________|
@@ -85,6 +110,7 @@ namespace
           grid->addWidget(image.radio, 1, 1);
 
           image.buttonFilename = new QPushButton("<choose filename>", mainWidget);
+          QObject::connect(image.buttonFilename, &QPushButton::clicked, [=](bool){ onButtonFilename(image.buttonFilename); });
           grid->addWidget(image.buttonFilename, 1, 2, 1, 2);
 
           image.comboChannel = new QComboBox(mainWidget);
@@ -98,26 +124,30 @@ namespace
       }
     }
 
-    State
-    getState()
-    const
+    void
+    onButtonFilename(QPushButton *button)
     {
-      State s;
+      QString inputDirectory = fnInputDirectory ? fnInputDirectory() : QDir::rootPath();
+      QString imageFilenameFilter = fnGetImageFilenameFilter ? fnGetImageFilenameFilter() : "All files (*.*)";
 
-      s.radioConstantSelected = constant.radio->isChecked();
-      s.radioImageSelected = image.radio->isChecked();
-      s.channelIndex = image.comboChannel->currentIndex();
-      s.constantValue = constant.value->value();
-      s.filename = image.buttonFilename->text();
+      QString filename = QFileDialog::getOpenFileName(this->mainWidget, "Select an input image", inputDirectory, imageFilenameFilter);
+      if (filename.isEmpty())
+        return;
 
-      return s;
+      this->image.filename = filename;
+      this->image.buttonFilename->setText(filename);
+      this->image.radio->setChecked(true);
+
+      if (fnInputDirectory)
+        fnInputDirectory() = QFileInfo(filename).absolutePath();
     }
   };
 } // namespace
 
 struct RgbaComposer::Private
 {
-  std::vector<ChannelUi> channelUis;
+  QString lastInputDir = QDir::rootPath();
+  std::unique_ptr<ChannelUi> channelUis[4]; // RGBA
 };
 
 RgbaComposer::RgbaComposer(QWidget *parent)
@@ -142,11 +172,12 @@ void RgbaComposer::setupUi()
   auto wholeLayout = new QVBoxLayout(wholeWidget);
   setCentralWidget(wholeWidget);
 
-  for (auto name : {"R", "G", "B", "A"})
+  for (int c = 0; c < 4; ++c)
   {
-    auto ui = ChannelUi(name, wholeWidget);
+    auto ui = ChannelUi::create(QString("RGBA"[c]), wholeWidget);
+    ui->fnInputDirectory = [this]() -> QString& { return p->lastInputDir; };
 
-    wholeLayout->addWidget(ui.mainWidget);
-    p->channelUis.push_back(std::move(ui));
+    wholeLayout->addWidget(ui->mainWidget);
+    p->channelUis[c] = std::move(ui);
   }
 }
