@@ -1,8 +1,9 @@
 #include "RgbaComposer.hh"
 #include "ui_RgbaComposer.h"
 
-#include <QtWidgets>
 #include <QDebug>
+#include <QImageReader>
+#include <QtWidgets>
 
 #include <functional>
 #include <memory>
@@ -50,6 +51,7 @@ namespace
       // can't use std::make_unique because constructor is private;
       // this way is not exception safe
       // since this is an internal struct I'm not worried
+      // but for a public struct/class there are safer ways to do this
       return std::unique_ptr<ChannelUi>{new ChannelUi(name, parent, state)};
     }
 
@@ -81,6 +83,9 @@ namespace
 
       {
         grid = new QGridLayout(mainWidget);
+        grid->setColumnStretch(0, 0);
+        grid->setColumnStretch(1, 0);
+        grid->setColumnStretch(3, 1);
 
         // label
         {
@@ -88,7 +93,8 @@ namespace
           QFont font = label->font();
           font.setPointSize(32);
           label->setFont(font);
-          grid->addWidget(label, 0, 0, Qt::AlignHCenter | Qt::AlignTop);
+          label->setMinimumWidth(50);
+          grid->addWidget(label, 0, 0, 3, 1, Qt::AlignHCenter | Qt::AlignTop);
         }
 
         // constant
@@ -101,7 +107,10 @@ namespace
           constant.value->setRange(0, 255);
           constant.value->setValue(0);
           constant.value->setAlignment(Qt::AlignHCenter);
+          QObject::connect(constant.value, QOverload<int>::of(&QSpinBox::valueChanged), [=](int){ constant.radio->setChecked(true); });
           grid->addWidget(constant.value, 0, 2);
+
+          grid->addWidget(new QLabel("in [0, 255]"), 0, 3);
         }
 
         // image
@@ -142,11 +151,32 @@ namespace
         fnInputDirectory() = QFileInfo(filename).absolutePath();
     }
   };
+
+  QString
+  generateImageFilenameFilter()
+  {
+    QStringList extensions;
+    for (const QByteArray &extension : QImageReader::supportedImageFormats())
+      extensions.append(extension);
+
+    QStringList extensionsFilters;
+    for (const QString &extension : extensions)
+      extensionsFilters.append("*." + extension);
+
+    QString all = "Images (" + extensionsFilters.join(" ") + ")";
+
+    QStringList formats(all);
+    for (const QString &extension : extensions)
+      formats.append(QString("%1 (*.%1)").arg(extension));
+
+    return formats.join(";;");
+  }
 } // namespace
 
 struct RgbaComposer::Private
 {
   QString lastInputDir = QDir::rootPath();
+  QString imageFilenameFilter = generateImageFilenameFilter();
   std::unique_ptr<ChannelUi> channelUis[4]; // RGBA
 };
 
@@ -176,8 +206,10 @@ void RgbaComposer::setupUi()
   {
     auto ui = ChannelUi::create(QString("RGBA"[c]), wholeWidget);
     ui->fnInputDirectory = [this]() -> QString& { return p->lastInputDir; };
-
+    ui->fnGetImageFilenameFilter = [this]() -> const QString& { return p->imageFilenameFilter; };
     wholeLayout->addWidget(ui->mainWidget);
     p->channelUis[c] = std::move(ui);
   }
+
+  adjustSize();
 }
