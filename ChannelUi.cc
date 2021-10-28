@@ -15,7 +15,7 @@ namespace
   {
     std::shared_ptr<Settings> settings;
 
-    int channel;
+    int outputChannel;
 
     QWidget *mainWidget{};
     QGridLayout *grid{};
@@ -29,15 +29,15 @@ namespace
     struct
     {
       QRadioButton *radio{};
-      QComboBox *comboChannel{};
+      QComboBox *comboInputChannel{};
       QCheckBox *checkInvert{};
       QPushButton *buttonFilename{};
       QString filename; // might be empty
     } image;
 
-    ChannelUi(int channel, std::shared_ptr<Settings> settings, QWidget *parent)
+    ChannelUi(int outputChannel, std::shared_ptr<Settings> settings, QWidget *parent)
       : settings{ settings }
-      , channel{ channel }
+      , outputChannel{ outputChannel }
     {
       buildUi(parent);
       initUi();
@@ -60,7 +60,7 @@ namespace
       {
         auto frame = new QFrame(parent);
         frame->setFrameShape(QFrame::Box);
-        frame->setStyleSheet(QString(".QFrame{Color: %1}").arg(Constants::colorNames[channel]));
+        frame->setStyleSheet(QString(".QFrame{Color: %1}").arg(Constants::colorNames[outputChannel]));
         mainWidget = frame;
       }
 
@@ -71,7 +71,7 @@ namespace
         grid->setColumnStretch(3, 1);
 
         {
-          auto label = new QLabel(Constants::channelNames[channel]);
+          auto label = new QLabel(Constants::channelNames[outputChannel]);
           QFont font = label->font();
           font.setPointSize(Constants::channelNamePointSize);
           label->setFont(font);
@@ -102,10 +102,10 @@ namespace
           QObject::connect(image.buttonFilename, &QPushButton::clicked, [=](bool){ onButtonFilename(); });
           grid->addWidget(image.buttonFilename, 1, 2, 1, 2);
 
-          image.comboChannel = new QComboBox(mainWidget);
-          image.comboChannel->addItems({"red", "green", "blue", "alpha"});
-          QObject::connect(image.comboChannel, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int i){ onComboChannel(i); });
-          grid->addWidget(image.comboChannel, 2, 2);
+          image.comboInputChannel = new QComboBox(mainWidget);
+          image.comboInputChannel->addItems({"red", "green", "blue", "alpha"});
+          QObject::connect(image.comboInputChannel, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int i){ onComboInputChannel(i); });
+          grid->addWidget(image.comboInputChannel, 2, 2);
 
           image.checkInvert = new QCheckBox("invert image", mainWidget);
           grid->addWidget(image.checkInvert, 2, 3);
@@ -135,15 +135,15 @@ namespace
     }
 
     void
-    onComboChannel(int channel)
+    onComboInputChannel(int inputChannel)
     {
-      // TODO
+      settings->setInputChannel(outputChannel, inputChannel);
     }
 
     void
     onConstantValue(int value)
     {
-      // TODO
+      settings->setInputConstant(outputChannel, value);
     }
 
     void
@@ -155,7 +155,7 @@ namespace
 }
 
 std::unique_ptr<IChannelUi>
-makeChannelUi(int channel, std::shared_ptr<Settings> settings, QWidget *parent)
+makeChannelUi(int outputChannel, std::shared_ptr<Settings> settings, QWidget *parent)
 {
-  return std::unique_ptr<ChannelUi>{new ChannelUi(channel, settings, parent)};
+  return std::unique_ptr<ChannelUi>{new ChannelUi(outputChannel, settings, parent)};
 }

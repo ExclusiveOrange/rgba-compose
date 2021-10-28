@@ -8,10 +8,8 @@ class Settings;
 struct IChannelUi
 {
   virtual ~IChannelUi() {}
-
   virtual QWidget *getMainWidget() = 0;
 };
 
 std::unique_ptr<IChannelUi>
-makeChannelUi(int channel, std::shared_ptr<Settings>, QWidget *parent);
-
+makeChannelUi(int outputChannel, std::shared_ptr<Settings>, QWidget *parent);

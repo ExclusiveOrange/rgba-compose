@@ -22,9 +22,6 @@ namespace
   struct Private
   {
     std::shared_ptr<Settings> settings = std::make_unique<Settings>();
-
-    QString outputImageFormatFilter = getOutputImageFilenameFilter();
-
     std::unique_ptr<IChannelUi> channelUis[4]; // RGBA
 
     void
@@ -38,7 +35,7 @@ namespace
         return;
 
       QString outputFormat = settings->getOutputFormat();
-      QString filename = QFileDialog::getSaveFileName(parent, "Composite image output filename", settings->getOutputDir(), outputImageFormatFilter, &outputFormat);
+      QString filename = QFileDialog::getSaveFileName(parent, "Composite image output filename", settings->getOutputDir(), getOutputImageFilenameFilter(), &outputFormat);
       if (filename.isEmpty())
         return;
 
@@ -62,6 +59,38 @@ namespace
       return maybeSize;
     }
 
+    std::function<quint8(QRgb)>
+    getChannelExtractor(int inputChannel)
+    {
+      // TODO: this could be rewritten to generate a new function based on an array of indices instead of using an array of pre-generated functions
+      const std::function<quint8(QRgb)> channelExtractors[4]{ // RGBA
+        // QRgb: An ARGB quadruplet on the format #AARRGGBB, equivalent to an unsigned int.
+        [](QRgb rgb){ return quint8((rgb >> 16) & 255); }, // red
+        [](QRgb rgb){ return quint8((rgb >> 8) & 255); }, // green
+        [](QRgb rgb){ return quint8(rgb & 255); }, // blue
+        [](QRgb rgb){ return quint8((rgb >> 24) & 255); }}; // alpha
+
+      return channelExtractors[inputChannel];
+    }
+
+    std::function<quint8(int x, int y)>
+    makePixelReader(int outputChannel, const std::function<QImage(QString filename)> &getImage)
+    {
+      switch (settings->getInputSource(outputChannel))
+      {
+        case Enums::InputSource::Constant:
+          return [v = settings->getInputConstant(outputChannel)](int,int) -> quint8 { return v; };
+
+        case Enums::InputSource::Image:
+          if (QImage image = getImage(settings->getInputImageFilename(outputChannel)); !image.isNull())
+            return
+                [image, channelExtractor = getChannelExtractor(settings->getInputChannel(outputChannel))]
+                (int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
+      }
+
+      return {};
+    }
+
     QImage
     prepareComposition(QWidget *parent)
     {
@@ -76,13 +105,6 @@ namespace
         [](QRgb rgb){ return quint8((rgb >> 8) & 255); }, // green
         [](QRgb rgb){ return quint8(rgb & 255); }, // blue
         [](QRgb rgb){ return quint8((rgb >> 24) & 255); }}; // alpha
-
-      // sort out which inputs go to which outputs
-      const int inputChannels[4]{ // index is output channel in RGBA
-        settings->getInputChannel(0),
-        settings->getInputChannel(1),
-        settings->getInputChannel(2),
-        settings->getInputChannel(3)};
 
       std::optional<QSize> imageSize;
 
@@ -115,27 +137,14 @@ namespace
       };
 
       // prepare reader functions
-      for (int c = 0; c < 4; ++c)
-      {
-        auto &channelUi = *channelUis[c];
-        auto inputChannel = inputChannels[c];
-        auto channelExtractor = channelExtractors[inputChannel];
-
-        switch (settings->getInputSource(c))
+      for (int outputChannel : {0, 1, 2, 3})
+        if (auto pixelReader = makePixelReader(outputChannel, getImage))
+          pixelReaders[outputChannel] = std::move(pixelReader);
+        else
         {
-          default:
-          case Enums::InputSource::Constant:
-            pixelReaders[c] = [v=settings->getInputConstant(c)](int,int) -> quint8 { return v; };
-            break;
-
-          case Enums::InputSource::Image:
-            if (QImage image = getImage(settings->getInputImageFilename(c)); !image.isNull())
-              pixelReaders[c] = [image, channelExtractor](int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
-            else
-              return {};
-            break;
+          QMessageBox::critical(parent, "Internal error", "There was a problem with internal method 'makePixelReader'. This might indicate a problem accessing the QSettings store (the registry on Windows).");
+          return {};
         }
-      }
 
       // if any image was loaded then imageSize should be set;
       // otherwise ask the user what size to make the output image
@@ -148,11 +157,9 @@ namespace
       for (int y = 0, yn = imageSize->height(); y < yn; ++y)
         for (int x = 0, xn = imageSize->width(); x < xn; ++x)
         {
-          quint8 a = pixelReaders[3](x, y);
-          quint8 r = pixelReaders[0](x, y);
-          quint8 g = pixelReaders[1](x, y);
-          quint8 b = pixelReaders[2](x, y);
-          QRgb pixel = (a << 24) | (r << 16) | (g << 8) | b;
+          QRgb pixel{};
+          for(int c : {3, 0, 1, 2}) // ARGB from RGBA
+            pixel = (pixel << 8) | pixelReaders[c](x, y);
           image.setPixel(x, y, pixel);
         }
 
@@ -180,21 +187,19 @@ RgbaComposer::~RgbaComposer()
 
 void RgbaComposer::setupUi()
 {
-
   auto mainWidget = new QWidget(this);
   auto mainLayout = new QVBoxLayout(mainWidget);
 
   setCentralWidget(mainWidget);
 
   // RGBA input widgets
-  for (int c = 0; c < 4; ++c)
+  for (int outputChannel : {0, 1, 2, 3})
   {
-    auto ui = makeChannelUi(c, p->settings, mainWidget);
+    auto ui = makeChannelUi(outputChannel, p->settings, mainWidget);
     mainLayout->addWidget(ui->getMainWidget());
-    p->channelUis[c] = std::move(ui);
+    p->channelUis[outputChannel] = std::move(ui);
   }
 
-  // save button
   {
     auto saveButton = new QPushButton("Save Composite Image...", mainWidget);
 
