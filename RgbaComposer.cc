@@ -1,14 +1,16 @@
 #include "RgbaComposer.hh"
 #include "ui_RgbaComposer.h"
 
+#include "Destroyer.hh"
+#include "GetImageSizeDialog.hh"
+
 #include <QDebug>
 #include <QImageReader>
 #include <QtWidgets>
 
 #include <functional>
 #include <memory>
-
-// TODO: use QSettings to remember user choices
+#include <optional>
 
 namespace
 {
@@ -18,6 +20,7 @@ namespace
     static constexpr int channelNameMinimumWidth = 50;
     static constexpr int saveButtonPointSize = 24;
     static constexpr const char *defaultSaveImageFormat = "png (*.png)";
+    static constexpr QSize defaultOutputSize = {1, 1};
   }
 
   struct Settings
@@ -27,11 +30,13 @@ namespace
       static constexpr const char
       *filename = "filename",
       *inputDir = "inputDir",
-      *outputDir = "outputDir";
+      *outputDir = "outputDir",
+      *outputFormat = "outputFormat",
+      *outputSize = "outputSize";
     } keys;
 
     QString
-    getInputDir()
+    getInputDir() const
     {
       if (settings.contains(keys.inputDir))
         if (QString inputDir = settings.value(keys.inputDir).toString(); QDir(inputDir).exists())
@@ -47,7 +52,7 @@ namespace
     }
 
     QString
-    getOutputDir()
+    getOutputDir() const
     {
       if (settings.contains(keys.outputDir))
         if (QString outputDir = settings.value(keys.outputDir).toString(); QDir(outputDir).exists())
@@ -60,6 +65,30 @@ namespace
     setOutputDir(QString outputDir)
     {
       settings.setValue(keys.outputDir, outputDir);
+    }
+
+    QString
+    getOutputFormat() const
+    {
+      return settings.value(keys.outputFormat, UiConstant::defaultSaveImageFormat).toString();
+    }
+
+    void
+    setOutputFormat(QString outputFormat)
+    {
+      settings.setValue(keys.outputFormat, outputFormat);
+    }
+
+    QSize
+    getOutputSize() const
+    {
+      return settings.value(keys.outputSize, UiConstant::defaultOutputSize).toSize();
+    }
+
+    void
+    setOutputSize(QSize outputSize)
+    {
+      settings.setValue(keys.outputSize, outputSize);
     }
 
   private:
@@ -251,51 +280,51 @@ struct RgbaComposer::Private
   QString inputImageFormatFilter = generateInputImageFilenameFilter();
   QString outputImageFormatFilter = generateOutputImageFilenameFilter();
 
-  QString lastOutputFormat;
-
   std::unique_ptr<ChannelUi> channelUis[4]; // RGBA
 
   void
   onButtonSave(QWidget *parent)
   {
-    if (lastOutputFormat.isEmpty())
-      lastOutputFormat = UiConstant::defaultSaveImageFormat;
+    parent->setDisabled(true);
+    Destroyer _parent{[=]{ parent->setDisabled(false); }};
 
-    QString filename = QFileDialog::getSaveFileName(parent, "Composite image output filename", settings->getOutputDir(), outputImageFormatFilter, &lastOutputFormat);
+    QImage composition = prepareComposition(parent);
+    if (composition.isNull())
+      return;
+
+    QString outputFormat = settings->getOutputFormat();
+    QString filename = QFileDialog::getSaveFileName(parent, "Composite image output filename", settings->getOutputDir(), outputImageFormatFilter, &outputFormat);
     if (filename.isEmpty())
       return;
 
     settings->setOutputDir(QFileInfo(filename).absolutePath());
+    settings->setOutputFormat(outputFormat);
 
-    parent->setDisabled(true);
-
-    QImage composition = prepareComposition(parent);
-    if (!composition.isNull())
-    {
-      QImageWriter writer(filename);
-      if (!writer.write(composition))
-        QMessageBox::critical(parent, "Error saving image file", "Couldn't save image to file " + QDir::toNativeSeparators(filename) + "\n\n" + writer.errorString());
-    }
-
-    parent->setDisabled(false);
+    QImageWriter writer(filename);
+    if (!writer.write(composition))
+      QMessageBox::critical(parent, "Error saving image file", "Couldn't save image to file " + QDir::toNativeSeparators(filename) + "\n\n" + writer.errorString());
   }
 
 private:
   QImage
   prepareComposition(QWidget *parent)
   {
+    // RGBA is the customary order and what is presented to the user in the UI, while QImage and QRgb expects ARGB.
+    // Thus the order in the arrays below is RGBA, but care is taken when extracting channels and creating a QRgb value.
+
     std::map<QString, QImage> images;
-    std::function<quint8(int x, int y)> readers[4];
-    const std::function<quint8(QRgb)> channelExtractors[4]{
+    std::function<quint8(int x, int y)> pixelReaders[4]; // RGBA
+    const std::function<quint8(QRgb)> channelExtractors[4]{ // RGBA
       // QRgb: An ARGB quadruplet on the format #AARRGGBB, equivalent to an unsigned int.
       [](QRgb rgb){ return quint8((rgb >> 16) & 255); }, // red
       [](QRgb rgb){ return quint8((rgb >> 8) & 255); }, // green
       [](QRgb rgb){ return quint8(rgb & 255); }, // blue
       [](QRgb rgb){ return quint8((rgb >> 24) & 255); }}; // alpha
 
+    std::optional<QSize> imageSize;
+
     auto getImage = [&](QString filename) -> QImage
     {
-
       if (auto mapIt = images.find(filename); mapIt != images.end())
         return mapIt->second;
 
@@ -307,33 +336,64 @@ private:
         return {};
       }
 
+      if (!imageSize)
+        imageSize = image.size();
+      else
+        if (*imageSize != image.size())
+        {
+          QMessageBox::critical(parent, "Image size mismatch", "The input images must be the same size but are different sizes.");
+          return {};
+        }
+
       images.emplace(filename, image);
 
       return image;
     };
 
+    // prepare reader functions
     for (int c = 0; c < 4; ++c)
     {
       auto &channelUi = *channelUis[c];
 
       if (channelUi.isConstant())
-        readers[c] = [v=channelUi.constantValue()](int,int) -> quint8 { return v; };
+        pixelReaders[c] = [v=channelUi.constantValue()](int,int) -> quint8 { return v; };
       else
         if (QImage image = getImage(channelUi.imageFilename()); !image.isNull())
-          readers[c] = [image, channelExtractor=channelExtractors[c]](int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
+          pixelReaders[c] = [image, channelExtractor=channelExtractors[c]](int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
         else
           return {};
     }
 
+    // if any image was loaded then imageSize should be set;
+    // otherwise ask the user what size to make the output image
+    if (!imageSize && !(imageSize = getImageSizeFromUser(settings->getOutputSize(), parent)))
+      return {};
 
+    settings->setOutputSize(*imageSize);
 
+    // compose new image
+    QImage image(*imageSize, QImage::Format_ARGB32);
 
+    for (int y = 0, yn = imageSize->height(); y < yn; ++y)
+      for (int x = 0, xn = imageSize->width(); x < xn; ++x)
+      {
+        quint8 a = pixelReaders[3](x, y);
+        quint8 r = pixelReaders[0](x, y);
+        quint8 g = pixelReaders[1](x, y);
+        quint8 b = pixelReaders[2](x, y);
+        QRgb pixel = (a << 24) | (r << 16) | (g << 8) | b;
+        image.setPixel(x, y, pixel);
+      }
 
-    // TODO
-    return {};
+    return image;
   }
 
-
+  std::optional<QSize>
+  getImageSizeFromUser(QSize initialSize, QWidget *parent)
+  {
+    auto dialog = std::make_unique<GetImageSizeDialog>("What image size?", "Since no input images were selected, you must tell me what size to make the output image.", initialSize, parent);
+    return dialog->getImageSizeModal();
+  }
 };
 
 RgbaComposer::RgbaComposer(QWidget *parent)
@@ -354,10 +414,10 @@ RgbaComposer::~RgbaComposer()
 void RgbaComposer::setupUi()
 {
 
-  auto wholeWidget = new QWidget(this);
-  auto wholeLayout = new QVBoxLayout(wholeWidget);
+  auto mainWidget = new QWidget(this);
+  auto mainLayout = new QVBoxLayout(mainWidget);
 
-  setCentralWidget(wholeWidget);
+  setCentralWidget(mainWidget);
 
   // RGBA input widgets
   for (int c = 0; c < 4; ++c)
@@ -365,18 +425,18 @@ void RgbaComposer::setupUi()
     constexpr const char *channelNames[4] = {"R", "G", "B", "A"};
     constexpr const char *colorNames[4] = {"Red", "Green", "Blue", "Black"};
 
-    auto ui = ChannelUi::create(channelNames[c], colorNames[c], p->settings, wholeWidget);
+    auto ui = ChannelUi::create(channelNames[c], colorNames[c], p->settings, mainWidget);
 
     ui->fnGetImageFilenameFilter = [this]() -> const QString& { return p->inputImageFormatFilter; };
 
-    wholeLayout->addWidget(ui->mainWidget);
+    mainLayout->addWidget(ui->mainWidget);
 
     p->channelUis[c] = std::move(ui);
   }
 
   // save button
   {
-    auto saveButton = new QPushButton("Save Composite Image...", wholeWidget);
+    auto saveButton = new QPushButton("Save Composite Image...", mainWidget);
 
     auto font = saveButton->font();
     font.setPointSize(UiConstant::saveButtonPointSize);
@@ -384,7 +444,7 @@ void RgbaComposer::setupUi()
 
     QObject::connect(saveButton, &QPushButton::clicked, [this](bool){ p->onButtonSave(this); });
 
-    wholeLayout->addWidget(saveButton);
+    mainLayout->addWidget(saveButton);
   }
 
   adjustSize();
