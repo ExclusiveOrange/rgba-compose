@@ -8,6 +8,8 @@ CONFIG += c++latest
 
 SOURCES += \
     GetImageSizeDialog.cc \
+    generateInputImageFilenameFilter.cc \
+    generateOutputImageFilenameFilter.cc \
     main.cc \
     RgbaComposer.cc
 
@@ -19,7 +21,9 @@ HEADERS += \
     Enums.hh \
     GetImageSizeDialog.hh \
     RgbaComposer.hh \
-    Settings.hh
+    Settings.hh \
+    generateInputImageFilenameFilter.hh \
+    generateOutputImageFilenameFilter.hh
 
 FORMS += \
     GetImageSizeDialog.ui \
