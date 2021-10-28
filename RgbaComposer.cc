@@ -17,6 +17,12 @@ namespace
     static constexpr int channelNamePointSize = 32;
     static constexpr int channelNameMinimumWidth = 50;
     static constexpr int saveButtonPointSize = 24;
+    static constexpr const char *defaultSaveImageFormat = "png (*.png)";
+  }
+
+  namespace SettingsKey
+  {
+    static constexpr const char *filename = "filename";
   }
 
   struct ChannelUi
@@ -27,17 +33,6 @@ namespace
     QString name;
     QWidget *mainWidget{};
     QGridLayout *grid{};
-
-    struct State
-    {
-      bool radioConstantSelected = true;
-      bool radioImageSelected = false;
-      int channelIndex = 0;
-      int constantValue = 0;
-      QString filename;
-
-      State(){}
-    };
 
     struct
     {
@@ -56,44 +51,29 @@ namespace
 
     static
     std::unique_ptr<ChannelUi>
-    create(QString name, QWidget *parent, State state = {})
+    create(QString name, QString colorName, QWidget *parent)
     {
       // can't use std::make_unique because constructor is private;
       // this way is not exception safe
       // since this is an internal struct I'm not worried
       // but for a public struct/class there are safer ways to do this
-      return std::unique_ptr<ChannelUi>{new ChannelUi(name, parent, state)};
+      return std::unique_ptr<ChannelUi>{new ChannelUi(name, colorName, parent)};
     }
 
     ~ChannelUi() = default;
 
-    State
-    getState()
-    const
-    {
-      State s;
-
-      s.radioConstantSelected = constant.radio->isChecked();
-      s.radioImageSelected = image.radio->isChecked();
-      s.channelIndex = image.comboChannel->currentIndex();
-      s.constantValue = constant.value->value();
-      s.filename = image.buttonFilename->text();
-
-      return s;
-    }
-
   private:
-    ChannelUi(QString name, QWidget *parent, State state = {})
+    ChannelUi(QString name, QString colorName, QWidget *parent)
       : name{ name }
     {
       // R  ( ) constant |___________|
       //    (*) image    |filename.png|
       //        [r,g,b,a]  [ ] invert
 
-//      mainWidget = new QWidget(parent);
       {
         auto frame = new QFrame(parent);
         frame->setFrameShape(QFrame::Box);
+        frame->setStyleSheet(QString(".QFrame{Color: %1}").arg(colorName));
         mainWidget = frame;
       }
 
@@ -171,36 +151,67 @@ namespace
   };
 
   QString
-  generateImageFilenameFilter()
+  generateInputImageFilenameFilter()
   {
-    QStringList extensions;
-    for (const QByteArray &extension : QImageReader::supportedImageFormats())
-      extensions.append(extension);
+    QStringList formats;
+    for (const QByteArray &format : QImageReader::supportedImageFormats())
+      formats.append(format);
 
-    QStringList extensionsFilters;
-    for (const QString &extension : extensions)
-      extensionsFilters.append("*." + extension);
+    QStringList formatFilters;
+    for (const QString &format : formats)
+      formatFilters.append("*." + format);
 
-    QString all = "Images (" + extensionsFilters.join(" ") + ")";
+    QString allFilter = "Images (" + formatFilters.join(" ") + ")";
 
-    QStringList formats(all);
-    for (const QString &extension : extensions)
-      formats.append(QString("%1 (*.%1)").arg(extension));
+    QStringList filter(allFilter);
+    for (const QString &format : formats)
+      filter.append(QString("%1 (*.%1)").arg(format));
 
-    return formats.join(";;");
+    return filter.join(";;");
+  }
+
+  QString
+  generateOutputImageFilenameFilter()
+  {
+    QStringList formats;
+    for (const QByteArray &format : QImageWriter::supportedImageFormats())
+      formats.append(format);
+
+    QStringList filter;
+    for (const QString &format : formats)
+      filter.append(QString("%1 (*.%1)").arg(format));
+
+    return filter.join(";;");
   }
 } // namespace
 
 struct RgbaComposer::Private
 {
+  QString inputImageFormatFilter = generateInputImageFilenameFilter();
   QString lastInputDir = QDir::rootPath();
-  QString imageFilenameFilter = generateImageFilenameFilter();
+
+  QString outputImageFormatFilter = generateOutputImageFilenameFilter();
+  QString lastOutputDir;
+  QString lastOutputFormat;
+
   std::unique_ptr<ChannelUi> channelUis[4]; // RGBA
 
+
   void
-  onButtonSave()
+  onButtonSave(QWidget *parent)
   {
-    // TODO: get filename or cancel
+    if (lastOutputDir.isEmpty())
+      lastOutputDir = lastInputDir; // lastInputDir should have a valid default
+
+    if (lastOutputFormat.isEmpty())
+      lastOutputFormat = UiConstant::defaultSaveImageFormat;
+
+    QString filename = QFileDialog::getSaveFileName(parent, "Composite image output filename", lastOutputDir, outputImageFormatFilter, &lastOutputFormat);
+    if (filename.isEmpty())
+      return;
+
+    lastOutputDir = QFileInfo(filename).absolutePath();
+
     // TODO: show "please wait" or something
     // TODO: get or create four single-color channel images
     // TODO: combine channel images into single image
@@ -229,25 +240,35 @@ void RgbaComposer::setupUi()
 
   auto wholeWidget = new QWidget(this);
   auto wholeLayout = new QVBoxLayout(wholeWidget);
+
   setCentralWidget(wholeWidget);
 
   // RGBA input widgets
   for (int c = 0; c < 4; ++c)
   {
-    auto ui = ChannelUi::create(QString("RGBA"[c]), wholeWidget);
+    constexpr const char *channelNames[4] = {"R", "G", "B", "A"};
+    constexpr const char *colorNames[4] = {"Red", "Green", "Blue", "Black"};
+
+    auto ui = ChannelUi::create(channelNames[c], colorNames[c], wholeWidget);
+
     ui->fnInputDirectory = [this]() -> QString& { return p->lastInputDir; };
-    ui->fnGetImageFilenameFilter = [this]() -> const QString& { return p->imageFilenameFilter; };
+    ui->fnGetImageFilenameFilter = [this]() -> const QString& { return p->inputImageFormatFilter; };
+
     wholeLayout->addWidget(ui->mainWidget);
+
     p->channelUis[c] = std::move(ui);
   }
 
   // save button
   {
     auto saveButton = new QPushButton("Save Composite Image...", wholeWidget);
+
     auto font = saveButton->font();
     font.setPointSize(UiConstant::saveButtonPointSize);
     saveButton->setFont(font);
-    QObject::connect(saveButton, &QPushButton::clicked, [this](bool){ p->onButtonSave(); });
+
+    QObject::connect(saveButton, &QPushButton::clicked, [this](bool){ p->onButtonSave(this); });
+
     wholeLayout->addWidget(saveButton);
   }
 
