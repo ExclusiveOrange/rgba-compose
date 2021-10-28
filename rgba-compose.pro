@@ -12,9 +12,14 @@ SOURCES += \
     RgbaComposer.cc
 
 HEADERS += \
+    ChannelUi.hh \
+    Constants.hh \
+    Defaults.hh \
     Destroyer.hh \
+    Enums.hh \
     GetImageSizeDialog.hh \
-    RgbaComposer.hh
+    RgbaComposer.hh \
+    Settings.hh
 
 FORMS += \
     GetImageSizeDialog.ui \
