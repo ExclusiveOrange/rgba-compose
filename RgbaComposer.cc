@@ -20,14 +20,55 @@ namespace
     static constexpr const char *defaultSaveImageFormat = "png (*.png)";
   }
 
-  namespace SettingsKey
+  struct Settings
   {
-    static constexpr const char *filename = "filename";
-  }
+    struct Keys
+    {
+      static constexpr const char
+      *filename = "filename",
+      *inputDir = "inputDir",
+      *outputDir = "outputDir";
+    } keys;
+
+    QString
+    getInputDir()
+    {
+      if (settings.contains(keys.inputDir))
+        if (QString inputDir = settings.value(keys.inputDir).toString(); QDir(inputDir).exists())
+          return inputDir;
+
+      return QDir::rootPath();
+    }
+
+    void
+    setInputDir(QString inputDir)
+    {
+      settings.setValue(keys.inputDir, inputDir);
+    }
+
+    QString
+    getOutputDir()
+    {
+      if (settings.contains(keys.outputDir))
+        if (QString outputDir = settings.value(keys.outputDir).toString(); QDir(outputDir).exists())
+          return outputDir;
+
+      return getInputDir();
+    }
+
+    void
+    setOutputDir(QString outputDir)
+    {
+      settings.setValue(keys.outputDir, outputDir);
+    }
+
+  private:
+    QSettings settings;
+  };
 
   struct ChannelUi
   {
-    std::function<QString&(void)> fnInputDirectory;
+    std::shared_ptr<Settings> settings;
     std::function<const QString&(void)> fnGetImageFilenameFilter;
 
     QString name;
@@ -51,20 +92,21 @@ namespace
 
     static
     std::unique_ptr<ChannelUi>
-    create(QString name, QString colorName, QWidget *parent)
+    create(QString name, QString colorName, std::shared_ptr<Settings> settings, QWidget *parent)
     {
       // can't use std::make_unique because constructor is private;
       // this way is not exception safe
       // since this is an internal struct I'm not worried
       // but for a public struct/class there are safer ways to do this
-      return std::unique_ptr<ChannelUi>{new ChannelUi(name, colorName, parent)};
+      return std::unique_ptr<ChannelUi>{new ChannelUi(name, colorName, settings, parent)};
     }
 
     ~ChannelUi() = default;
 
   private:
-    ChannelUi(QString name, QString colorName, QWidget *parent)
-      : name{ name }
+    ChannelUi(QString name, QString colorName, std::shared_ptr<Settings> settings, QWidget *parent)
+      : settings{ settings }
+      , name{ name }
     {
       // R  ( ) constant |___________|
       //    (*) image    |filename.png|
@@ -115,7 +157,7 @@ namespace
           grid->addWidget(image.radio, 1, 1);
 
           image.buttonFilename = new QPushButton("<choose filename>", mainWidget);
-          QObject::connect(image.buttonFilename, &QPushButton::clicked, [=](bool){ onButtonFilename(image.buttonFilename); });
+          QObject::connect(image.buttonFilename, &QPushButton::clicked, [=](bool){ onButtonFilename(); });
           grid->addWidget(image.buttonFilename, 1, 2, 1, 2);
 
           image.comboChannel = new QComboBox(mainWidget);
@@ -130,13 +172,12 @@ namespace
     }
 
     void
-    onButtonFilename(QPushButton *button)
+    onButtonFilename()
     {
-      QString inputDirectory = fnInputDirectory ? fnInputDirectory() : QDir::rootPath();
       QString imageFilenameFilter = fnGetImageFilenameFilter ? fnGetImageFilenameFilter() : "All files (*.*)";
 
       // try to get a filename from the user
-      QString filename = QFileDialog::getOpenFileName(this->mainWidget, "Select an input image", inputDirectory, imageFilenameFilter);
+      QString filename = QFileDialog::getOpenFileName(this->mainWidget, "Select an input image", settings->getInputDir(), imageFilenameFilter);
       if (filename.isEmpty())
         return;
 
@@ -144,9 +185,7 @@ namespace
       this->image.buttonFilename->setText(QDir::toNativeSeparators(filename));
       this->image.radio->setChecked(true);
 
-      // remember this directory for the next time an open file dialog is shown
-      if (fnInputDirectory)
-        fnInputDirectory() = QFileInfo(filename).absolutePath();
+      settings->setInputDir(QFileInfo(filename).absolutePath());
     }
   };
 
@@ -187,11 +226,11 @@ namespace
 
 struct RgbaComposer::Private
 {
-  QString inputImageFormatFilter = generateInputImageFilenameFilter();
-  QString lastInputDir = QDir::rootPath();
+  std::shared_ptr<Settings> settings = std::make_unique<Settings>();
 
+  QString inputImageFormatFilter = generateInputImageFilenameFilter();
   QString outputImageFormatFilter = generateOutputImageFilenameFilter();
-  QString lastOutputDir;
+
   QString lastOutputFormat;
 
   std::unique_ptr<ChannelUi> channelUis[4]; // RGBA
@@ -200,23 +239,24 @@ struct RgbaComposer::Private
   void
   onButtonSave(QWidget *parent)
   {
-    if (lastOutputDir.isEmpty())
-      lastOutputDir = lastInputDir; // lastInputDir should have a valid default
-
     if (lastOutputFormat.isEmpty())
       lastOutputFormat = UiConstant::defaultSaveImageFormat;
 
-    QString filename = QFileDialog::getSaveFileName(parent, "Composite image output filename", lastOutputDir, outputImageFormatFilter, &lastOutputFormat);
+    QString filename = QFileDialog::getSaveFileName(parent, "Composite image output filename", settings->getOutputDir(), outputImageFormatFilter, &lastOutputFormat);
     if (filename.isEmpty())
       return;
 
-    lastOutputDir = QFileInfo(filename).absolutePath();
+    settings->setOutputDir(QFileInfo(filename).absolutePath());
+
+    parent->setDisabled(true);
 
     // TODO: show "please wait" or something
     // TODO: get or create four single-color channel images
     // TODO: combine channel images into single image
     // TODO: write single image to file
     // TODO: show "done" message"
+
+    parent->setDisabled(false);
   }
 };
 
@@ -249,9 +289,8 @@ void RgbaComposer::setupUi()
     constexpr const char *channelNames[4] = {"R", "G", "B", "A"};
     constexpr const char *colorNames[4] = {"Red", "Green", "Blue", "Black"};
 
-    auto ui = ChannelUi::create(channelNames[c], colorNames[c], wholeWidget);
+    auto ui = ChannelUi::create(channelNames[c], colorNames[c], p->settings, wholeWidget);
 
-    ui->fnInputDirectory = [this]() -> QString& { return p->lastInputDir; };
     ui->fnGetImageFilenameFilter = [this]() -> const QString& { return p->inputImageFormatFilter; };
 
     wholeLayout->addWidget(ui->mainWidget);
@@ -273,4 +312,6 @@ void RgbaComposer::setupUi()
   }
 
   adjustSize();
+  setMinimumHeight(size().height());
+  setMaximumHeight(size().height());
 }
