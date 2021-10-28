@@ -103,6 +103,26 @@ namespace
 
     ~ChannelUi() = default;
 
+    bool isConstant() const
+    {
+      return constant.radio->isChecked();
+    }
+
+    int constantValue() const
+    {
+      return constant.value->value();
+    }
+
+    bool isImage() const
+    {
+      return image.radio->isChecked();
+    }
+
+    QString imageFilename() const
+    {
+      return image.filename;
+    }
+
   private:
     ChannelUi(QString name, QString colorName, std::shared_ptr<Settings> settings, QWidget *parent)
       : settings{ settings }
@@ -235,7 +255,6 @@ struct RgbaComposer::Private
 
   std::unique_ptr<ChannelUi> channelUis[4]; // RGBA
 
-
   void
   onButtonSave(QWidget *parent)
   {
@@ -250,14 +269,71 @@ struct RgbaComposer::Private
 
     parent->setDisabled(true);
 
-    // TODO: show "please wait" or something
-    // TODO: get or create four single-color channel images
-    // TODO: combine channel images into single image
-    // TODO: write single image to file
-    // TODO: show "done" message"
+    QImage composition = prepareComposition(parent);
+    if (!composition.isNull())
+    {
+      QImageWriter writer(filename);
+      if (!writer.write(composition))
+        QMessageBox::critical(parent, "Error saving image file", "Couldn't save image to file " + QDir::toNativeSeparators(filename) + "\n\n" + writer.errorString());
+    }
 
     parent->setDisabled(false);
   }
+
+private:
+  QImage
+  prepareComposition(QWidget *parent)
+  {
+    std::map<QString, QImage> images;
+    std::function<quint8(int x, int y)> readers[4];
+    const std::function<quint8(QRgb)> channelExtractors[4]{
+      // QRgb: An ARGB quadruplet on the format #AARRGGBB, equivalent to an unsigned int.
+      [](QRgb rgb){ return quint8((rgb >> 16) & 255); }, // red
+      [](QRgb rgb){ return quint8((rgb >> 8) & 255); }, // green
+      [](QRgb rgb){ return quint8(rgb & 255); }, // blue
+      [](QRgb rgb){ return quint8((rgb >> 24) & 255); }}; // alpha
+
+    auto getImage = [&](QString filename) -> QImage
+    {
+
+      if (auto mapIt = images.find(filename); mapIt != images.end())
+        return mapIt->second;
+
+      QImage image;
+      QImageReader reader(filename);
+      if (!reader.read(&image))
+      {
+        QMessageBox::critical(parent, "Error reading image file", "Couldn't read image from file " + QDir::toNativeSeparators(filename) + "\n\n" + reader.errorString());
+        return {};
+      }
+
+      images.emplace(filename, image);
+
+      return image;
+    };
+
+    for (int c = 0; c < 4; ++c)
+    {
+      auto &channelUi = *channelUis[c];
+
+      if (channelUi.isConstant())
+        readers[c] = [v=channelUi.constantValue()](int,int) -> quint8 { return v; };
+      else
+        if (QImage image = getImage(channelUi.imageFilename()); !image.isNull())
+          readers[c] = [image, channelExtractor=channelExtractors[c]](int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
+        else
+          return {};
+    }
+
+
+
+
+
+    // TODO
+    return {};
+  }
+
+
 };
 
 RgbaComposer::RgbaComposer(QWidget *parent)
