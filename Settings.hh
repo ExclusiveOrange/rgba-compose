@@ -23,18 +23,20 @@ class Settings
     struct PerOutputChannel
     {
       static constexpr const char
+      *constantValue = "constantValue",
       *inputChannel = "inputChannel",
+      *inputImageFilename = "inputImageFilename",
       *inputSource = "inputSource";
     } perOutputChannel;
   } keys;
-
-public:
 
   QString
   getPerOutputChannelPrefix(int outputChannel) const
   {
     return QString("%1_%2/").arg(keys.outputChannel).arg(outputChannel);
   }
+
+public:
 
   int
   getInputChannel(int outputChannel) const
@@ -48,16 +50,16 @@ public:
     settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputChannel, inputChannel);
   }
 
-  Enums::InputSource
-  getInputSource(int outputChannel) const
+  quint8
+  getInputConstant(int outputChannel)
   {
-    return settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputSource, QVariant::fromValue(Defaults::inputSource)).value<Enums::InputSource>();
+    return settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.constantValue, 0).toUInt();
   }
 
   void
-  setInputSource(int outputChannel, Enums::InputSource inputSource)
+  setInputConstant(int outputChannel, quint8 constant)
   {
-    settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputSource, QVariant::fromValue(inputSource));
+    settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.constantValue, constant);
   }
 
   QString
@@ -74,6 +76,30 @@ public:
   setInputDir(QString inputDir)
   {
     settings.setValue(keys.inputDir, inputDir);
+  }
+
+  QString
+  getInputImageFilename(int outputChannel)
+  {
+    return settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputImageFilename, QString()).toString();
+  }
+
+  void
+  setInputImageFilename(int outputChannel, QString filename)
+  {
+    settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputImageFilename, filename);
+  }
+
+  Enums::InputSource
+  getInputSource(int outputChannel) const
+  {
+    return settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputSource, QVariant::fromValue(Defaults::inputSource)).value<Enums::InputSource>();
+  }
+
+  void
+  setInputSource(int outputChannel, Enums::InputSource inputSource)
+  {
+    settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputSource, QVariant::fromValue(inputSource));
   }
 
   QString

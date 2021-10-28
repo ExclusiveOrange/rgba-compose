@@ -2,9 +2,9 @@
 #include "ui_RgbaComposer.h"
 
 #include "ChannelUi.hh"
+#include "Constants.hh"
 #include "Destroyer.hh"
-#include "generateInputImageFilenameFilter.hh"
-#include "generateOutputImageFilenameFilter.hh"
+#include "getOutputImageFilenameFilter.hh"
 #include "GetImageSizeDialog.hh"
 #include "Settings.hh"
 
@@ -19,17 +19,13 @@
 
 namespace
 {
-
-  enum class ChangeSource { Settings, Widget };
-
   struct Private
   {
     std::shared_ptr<Settings> settings = std::make_unique<Settings>();
 
-    QString inputImageFormatFilter = generateInputImageFilenameFilter();
-    QString outputImageFormatFilter = generateOutputImageFilenameFilter();
+    QString outputImageFormatFilter = getOutputImageFilenameFilter();
 
-    std::unique_ptr<ChannelUi> channelUis[4]; // RGBA
+    std::unique_ptr<IChannelUi> channelUis[4]; // RGBA
 
     void
     onButtonSave(QWidget *parent)
@@ -55,6 +51,17 @@ namespace
     }
 
   private:
+
+    std::optional<QSize>
+    getImageSizeFromUser(QWidget *parent)
+    {
+      auto dialog = std::make_unique<GetImageSizeDialog>("What image size?", "Since no input images were selected, you must tell me what size to make the output image.", settings->getOutputSize(), parent);
+      auto maybeSize = dialog->getImageSizeModal();
+      if (maybeSize)
+        settings->setOutputSize(*maybeSize);
+      return maybeSize;
+    }
+
     QImage
     prepareComposition(QWidget *parent)
     {
@@ -73,9 +80,9 @@ namespace
       // sort out which inputs go to which outputs
       const int inputChannels[4]{ // index is output channel in RGBA
         settings->getInputChannel(0),
-            settings->getInputChannel(1),
-            settings->getInputChannel(2),
-            settings->getInputChannel(3)};
+        settings->getInputChannel(1),
+        settings->getInputChannel(2),
+        settings->getInputChannel(3)};
 
       std::optional<QSize> imageSize;
 
@@ -114,13 +121,20 @@ namespace
         auto inputChannel = inputChannels[c];
         auto channelExtractor = channelExtractors[inputChannel];
 
-        if (channelUi.isConstant())
-          pixelReaders[c] = [v=channelUi.constantValue()](int,int) -> quint8 { return v; };
-        else
-          if (QImage image = getImage(channelUi.imageFilename()); !image.isNull())
-            pixelReaders[c] = [image, channelExtractor](int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
-          else
-            return {};
+        switch (settings->getInputSource(c))
+        {
+          default:
+          case Enums::InputSource::Constant:
+            pixelReaders[c] = [v=settings->getInputConstant(c)](int,int) -> quint8 { return v; };
+            break;
+
+          case Enums::InputSource::Image:
+            if (QImage image = getImage(settings->getInputImageFilename(c)); !image.isNull())
+              pixelReaders[c] = [image, channelExtractor](int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
+            else
+              return {};
+            break;
+        }
       }
 
       // if any image was loaded then imageSize should be set;
@@ -143,16 +157,6 @@ namespace
         }
 
       return image;
-    }
-
-    std::optional<QSize>
-    getImageSizeFromUser(QWidget *parent)
-    {
-      auto dialog = std::make_unique<GetImageSizeDialog>("What image size?", "Since no input images were selected, you must tell me what size to make the output image.", settings->getOutputSize(), parent);
-      auto maybeSize = dialog->getImageSizeModal();
-      if (maybeSize)
-        settings->setOutputSize(*maybeSize);
-      return maybeSize;
     }
   };
 } // namespace
@@ -185,9 +189,8 @@ void RgbaComposer::setupUi()
   // RGBA input widgets
   for (int c = 0; c < 4; ++c)
   {
-    auto ui = ChannelUi::create(c, p->settings, mainWidget);
-    ui->fnGetImageFilenameFilter = [this]() -> const QString& { return p->inputImageFormatFilter; };
-    mainLayout->addWidget(ui->mainWidget);
+    auto ui = makeChannelUi(c, p->settings, mainWidget);
+    mainLayout->addWidget(ui->getMainWidget());
     p->channelUis[c] = std::move(ui);
   }
 

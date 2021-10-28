@@ -7,9 +7,10 @@ CONFIG += c++latest
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    ChannelUi.cc \
     GetImageSizeDialog.cc \
-    generateInputImageFilenameFilter.cc \
-    generateOutputImageFilenameFilter.cc \
+    getInputImageFilenameFilter.cc \
+    getOutputImageFilenameFilter.cc \
     main.cc \
     RgbaComposer.cc
 
@@ -22,8 +23,8 @@ HEADERS += \
     GetImageSizeDialog.hh \
     RgbaComposer.hh \
     Settings.hh \
-    generateInputImageFilenameFilter.hh \
-    generateOutputImageFilenameFilter.hh
+    getInputImageFilenameFilter.hh \
+    getOutputImageFilenameFilter.hh
 
 FORMS += \
     GetImageSizeDialog.ui \
