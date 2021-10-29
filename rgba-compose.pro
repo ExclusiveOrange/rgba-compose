@@ -19,8 +19,8 @@ HEADERS += \
     Constants.hh \
     Defaults.hh \
     Destroyer.hh \
-    Enums.hh \
     GetImageSizeDialog.hh \
+    InputSource.hh \
     RgbaComposer.hh \
     Settings.hh \
     getInputImageFilenameFilter.hh \

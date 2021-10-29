@@ -1,16 +1,18 @@
 #include "ChannelUi.hh"
 
 #include "Constants.hh"
-#include "Enums.hh"
 #include "getInputImageFilenameFilter.hh"
 #include "Settings.hh"
 
+#include <QSignalBlocker>
 #include <QtWidgets>
 
 #include <functional>
 
 namespace
 {
+  enum class From { Settings, Widget };
+
   struct ChannelUi : IChannelUi
   {
     std::shared_ptr<Settings> settings;
@@ -81,13 +83,13 @@ namespace
 
         {
           constant.radio = new QRadioButton("constant", mainWidget);
-          QObject::connect(constant.radio, &QRadioButton::clicked, [=](bool checked){ if (checked) setInputSourceTo(Enums::InputSource::Constant); });
+          QObject::connect(constant.radio, &QRadioButton::clicked, [=](bool checked){ if (checked) setInputSource(InputSource::Constant); });
           grid->addWidget(constant.radio, 0, 1);
 
           constant.value = new QSpinBox(mainWidget);
           constant.value->setRange(0, 255);
           constant.value->setAlignment(Qt::AlignHCenter);
-          QObject::connect(constant.value, QOverload<int>::of(&QSpinBox::valueChanged), [=](int v){ onConstantValue(v); });
+          QObject::connect(constant.value, QOverload<int>::of(&QSpinBox::valueChanged), [=](int v){ setInputConstant(v); });
           grid->addWidget(constant.value, 0, 2);
 
           grid->addWidget(new QLabel("in [0, 255]"), 0, 3);
@@ -95,19 +97,20 @@ namespace
 
         {
           image.radio = new QRadioButton("image", mainWidget);
-          QObject::connect(image.radio, &QRadioButton::clicked, [=](bool checked){ if (checked) setInputSourceTo(Enums::InputSource::Image); });
+          QObject::connect(image.radio, &QRadioButton::clicked, [=](bool checked){ if (checked) setInputSource(InputSource::Image); });
           grid->addWidget(image.radio, 1, 1);
 
-          image.buttonFilename = new QPushButton("<choose filename>", mainWidget);
+          image.buttonFilename = new QPushButton(mainWidget);
           QObject::connect(image.buttonFilename, &QPushButton::clicked, [=](bool){ onButtonFilename(); });
           grid->addWidget(image.buttonFilename, 1, 2, 1, 2);
 
           image.comboInputChannel = new QComboBox(mainWidget);
           image.comboInputChannel->addItems({"red", "green", "blue", "alpha"});
-          QObject::connect(image.comboInputChannel, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int i){ onComboInputChannel(i); });
+          QObject::connect(image.comboInputChannel, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int i){ setInputChannel(i); });
           grid->addWidget(image.comboInputChannel, 2, 2);
 
           image.checkInvert = new QCheckBox("invert image", mainWidget);
+          QObject::connect(image.checkInvert, &QCheckBox::clicked, [=](bool i){ setInputImageInvert(i); });
           grid->addWidget(image.checkInvert, 2, 3);
         }
       }
@@ -116,7 +119,11 @@ namespace
     void
     initUi()
     {
-      // TODO
+      setInputSource(settings->getInputSource(outputChannel), true);
+      setInputConstant(settings->getInputConstant(outputChannel), true);
+      setInputImageFilename(settings->getInputImageFilename(outputChannel), true);
+      setInputChannel(settings->getInputChannel(outputChannel), true);
+      setInputImageInvert(settings->getInputImageInvert(outputChannel), true);
     }
 
     void
@@ -127,29 +134,69 @@ namespace
       if (filename.isEmpty())
         return;
 
-      this->image.filename = filename;
-      this->image.buttonFilename->setText(QDir::toNativeSeparators(filename));
-      this->image.radio->setChecked(true);
-
       settings->setInputDir(QFileInfo(filename).absolutePath());
+      setInputImageFilename(filename);
+      setInputSource(InputSource::Image);
     }
 
     void
-    onComboInputChannel(int inputChannel)
+    setInputChannel(int inputChannel, bool fromSettings = false)
     {
-      settings->setInputChannel(outputChannel, inputChannel);
+      if (!fromSettings)
+      {
+        setInputSource(InputSource::Image);
+        settings->setInputChannel(outputChannel, inputChannel);
+      }
+
+      QSignalBlocker b(image.comboInputChannel);
+      image.comboInputChannel->setCurrentIndex(inputChannel);
     }
 
     void
-    onConstantValue(int value)
+    setInputConstant(quint8 value, bool fromSettings = false)
     {
-      settings->setInputConstant(outputChannel, value);
+      if (!fromSettings)
+      {
+        setInputSource(InputSource::Constant);
+        settings->setInputConstant(outputChannel, value);
+      }
+
+      QSignalBlocker b(constant.value);
+      constant.value->setValue(value);
     }
 
     void
-    setInputSourceTo(Enums::InputSource inputSource)
+    setInputImageFilename(QString filename, bool fromSettings = false)
     {
-      qDebug() << "setInputSourceTo(" << inputSource << ")";
+      if (!fromSettings)
+        settings->setInputImageFilename(outputChannel, filename);
+
+      QString buttonText = filename.isEmpty() ? "<click to select an image file>" : QDir::toNativeSeparators(filename);
+      this->image.buttonFilename->setText(buttonText);
+    }
+
+    void
+    setInputImageInvert(bool invert, bool fromSettings = false)
+    {
+      if (!fromSettings)
+      {
+        setInputSource(InputSource::Image);
+        settings->setInputImageInvert(outputChannel, invert);
+      }
+
+      QSignalBlocker b(image.checkInvert);
+      image.checkInvert->setChecked(invert);
+    }
+
+    void
+    setInputSource(InputSource inputSource, bool fromSettings = false)
+    {
+      if (!fromSettings)
+        settings->setInputSource(outputChannel, inputSource);
+
+      QRadioButton *radio = inputSource == InputSource::Image ? image.radio : constant.radio;
+      QSignalBlocker b(radio);
+      radio->setChecked(true);
     }
   };
 }

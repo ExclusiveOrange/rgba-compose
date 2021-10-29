@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Defaults.hh"
-#include "Enums.hh"
+#include "InputSource.hh"
 
 #include <QDir>
 #include <QSettings>
@@ -26,6 +26,7 @@ class Settings
       *constantValue = "constantValue",
       *inputChannel = "inputChannel",
       *inputImageFilename = "inputImageFilename",
+      *inputImageInvert = "inputImageInvert",
       *inputSource = "inputSource";
     } perOutputChannel;
   } keys;
@@ -41,7 +42,10 @@ public:
   int
   getInputChannel(int outputChannel) const
   {
-    return settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputChannel, 0).toInt();
+    int inputChannel = settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputChannel, 0).toInt();
+    if (inputChannel < 0 || inputChannel >= 4)
+      inputChannel = 0;
+    return inputChannel;
   }
 
   void
@@ -90,16 +94,31 @@ public:
     settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputImageFilename, filename);
   }
 
-  Enums::InputSource
-  getInputSource(int outputChannel) const
+  bool
+  getInputImageInvert(int outputChannel)
   {
-    return settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputSource, QVariant::fromValue(Defaults::inputSource)).value<Enums::InputSource>();
+    return settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputImageInvert, false).toBool();
   }
 
   void
-  setInputSource(int outputChannel, Enums::InputSource inputSource)
+  setInputImageInvert(int outputChannel, bool invert)
   {
-    settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputSource, QVariant::fromValue(inputSource));
+    settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputImageInvert, invert);
+  }
+
+  InputSource
+  getInputSource(int outputChannel) const
+  {
+    unsigned rawValue = settings.value(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputSource, (unsigned)Defaults::inputSource).toUInt();
+    if (rawValue >= (unsigned)InputSource::NUM)
+      rawValue = (unsigned)Defaults::inputSource;
+    return (InputSource)rawValue;
+  }
+
+  void
+  setInputSource(int outputChannel, InputSource inputSource)
+  {
+    settings.setValue(getPerOutputChannelPrefix(outputChannel) + keys.perOutputChannel.inputSource,  (unsigned)inputSource);
   }
 
   QString

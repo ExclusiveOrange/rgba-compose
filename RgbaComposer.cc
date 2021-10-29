@@ -78,10 +78,10 @@ namespace
     {
       switch (settings->getInputSource(outputChannel))
       {
-        case Enums::InputSource::Constant:
+        case InputSource::Constant:
           return [v = settings->getInputConstant(outputChannel)](int,int) -> quint8 { return v; };
 
-        case Enums::InputSource::Image:
+        case InputSource::Image:
           if (QImage image = getImage(settings->getInputImageFilename(outputChannel)); !image.isNull())
             return
                 [image, channelExtractor = getChannelExtractor(settings->getInputChannel(outputChannel))]
