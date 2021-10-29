@@ -83,9 +83,16 @@ namespace
 
         case InputSource::Image:
           if (QImage image = getImage(settings->getInputImageFilename(outputChannel)); !image.isNull())
-            return
-                [image, channelExtractor = getChannelExtractor(settings->getInputChannel(outputChannel))]
-                (int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
+          {
+            if (settings->getInputImageInvert(outputChannel))
+              return
+                  [image, channelExtractor = getChannelExtractor(settings->getInputChannel(outputChannel))]
+                  (int x, int y) -> quint8 { return 255 - channelExtractor(image.pixel(x, y)); };
+            else
+              return
+                  [image, channelExtractor = getChannelExtractor(settings->getInputChannel(outputChannel))]
+                  (int x, int y) -> quint8 { return channelExtractor(image.pixel(x, y)); };
+          }
       }
 
       return {};
@@ -99,12 +106,6 @@ namespace
 
       std::map<QString, QImage> images;
       std::function<quint8(int x, int y)> pixelReaders[4]; // RGBA
-      const std::function<quint8(QRgb)> channelExtractors[4]{ // RGBA
-        // QRgb: An ARGB quadruplet on the format #AARRGGBB, equivalent to an unsigned int.
-        [](QRgb rgb){ return quint8((rgb >> 16) & 255); }, // red
-        [](QRgb rgb){ return quint8((rgb >> 8) & 255); }, // green
-        [](QRgb rgb){ return quint8(rgb & 255); }, // blue
-        [](QRgb rgb){ return quint8((rgb >> 24) & 255); }}; // alpha
 
       std::optional<QSize> imageSize;
 
