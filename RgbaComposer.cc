@@ -29,6 +29,7 @@ namespace
     {
       parent->setDisabled(true);
       Destroyer _parent{[=]{ parent->setDisabled(false); }};
+      QCoreApplication::processEvents();
 
       QImage composition = prepareComposition(parent);
       if (composition.isNull())
