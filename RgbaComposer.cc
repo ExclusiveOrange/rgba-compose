@@ -17,6 +17,8 @@
 #include <memory>
 #include <optional>
 
+#include <chrono>
+
 namespace
 {
   struct Private
@@ -157,13 +159,17 @@ namespace
       QImage image(*imageSize, QImage::Format_ARGB32);
 
       for (int y = 0, yn = imageSize->height(); y < yn; ++y)
+      {
+        auto *dst = (QRgb*)image.scanLine(y);
+
         for (int x = 0, xn = imageSize->width(); x < xn; ++x)
         {
           QRgb pixel{};
           for(int c : {3, 0, 1, 2}) // ARGB from RGBA
             pixel = (pixel << 8) | pixelReaders[c](x, y);
-          image.setPixel(x, y, pixel);
+          dst[x] = pixel;
         }
+      }
 
       return image;
     }
@@ -208,6 +214,7 @@ void RgbaComposer::setupUi()
     auto font = saveButton->font();
     font.setPointSize(Constants::saveButtonPointSize);
     saveButton->setFont(font);
+    saveButton->setProperty("name", "save");
 
     QObject::connect(saveButton, &QPushButton::clicked, [this](bool){ p->onButtonSave(this); });
 
