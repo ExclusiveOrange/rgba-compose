@@ -214,7 +214,6 @@ void RgbaComposer::setupUi()
     auto font = saveButton->font();
     font.setPointSize(Constants::saveButtonPointSize);
     saveButton->setFont(font);
-    saveButton->setProperty("name", "save");
 
     QObject::connect(saveButton, &QPushButton::clicked, [this](bool){ p->onButtonSave(this); });
 
